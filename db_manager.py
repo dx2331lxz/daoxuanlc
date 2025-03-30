@@ -1,3 +1,23 @@
+"""数据库管理模块
+
+本模块负责管理项目中的数据库操作，包括用户偏好的存储和检索，以及向量数据的管理。主要功能包括：
+
+1. 用户偏好管理：
+   - 保存用户对不同类型文本的编辑偏好
+   - 检索和获取用户的历史偏好记录
+   - 支持按文本类型分类存储偏好
+
+2. 向量数据管理：
+   - 通过VectorStoreManager管理文档的向量存储
+   - 支持相似文档的检索功能
+   - 提供专业领域知识的存储和检索接口
+
+与其他模块的交互：
+- 与editor.models模块交互，使用UserPreference模型进行数据持久化
+- 与vector_manager模块集成，处理文档的向量化存储和检索
+- 为preference_manager模块提供数据存储支持
+"""
+
 from django.db import connection
 from editor.models import UserPreference
 from typing import List, Dict, Optional

@@ -1,3 +1,22 @@
+"""AI编辑器助手模块
+
+本模块实现了一个基于大语言模型的编辑器助手系统，通过整合多个管理器组件，提供智能文本生成和编辑功能。
+
+主要功能：
+- 基于RAG（检索增强生成）的文本生成
+- 用户偏好学习和应用
+- 知识库集成
+- 编辑历史记录
+
+核心类：
+AIEditorAssistant - 编辑器助手的主类，整合了以下功能：
+- 文本生成：使用LLM结合上下文进行智能生成
+- 用户偏好管理：学习和应用用户的编辑偏好
+- 向量存储：管理文档的向量表示
+- 知识库访问：集成领域知识支持
+- 数据库操作：记录编辑历史
+"""
+
 from typing import Optional
 from langchain_core.language_models import BaseChatModel
 from langchain_core.embeddings import Embeddings
@@ -33,7 +52,7 @@ class AIEditorAssistant:
         
         # 1. 定义检索链
         def retrieve_docs(input_dict: Dict[str, Any]) -> Dict[str, Any]:
-            docs = self.vector_manager.get_similar_content(input_dict["user_text"], k=top_k)
+            docs = self.vector_manager.search_similar_documents(input_dict["user_text"], k=top_k)
             return {"docs": [doc for doc in docs if doc.relevance_score > 0.7]}
             
         retriever_chain = RunnablePassthrough().assign(docs=retrieve_docs)
@@ -51,7 +70,7 @@ class AIEditorAssistant:
                 "preferences": preferences,
                 "kb_context": kb_context
             }
-            
+
         context_chain = RunnablePassthrough().assign(**enhance_context)
         
         # 3. 定义提示词模板
@@ -89,7 +108,7 @@ class AIEditorAssistant:
     def record_user_edit(self, original_text: str, edited_text: str, text_type: Optional[str] = None) -> None:
         """记录用户编辑"""
         # 更新用户偏好
-        self.preference_manager.update_preferences(original_text, edited_text, text_type)
+        self.preference_manager.analyze_edits(original_text, edited_text, text_type)
         
         # 保存到向量存储
         self.vector_manager.add_content(edited_text, text_type)

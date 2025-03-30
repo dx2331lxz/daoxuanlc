@@ -1,3 +1,20 @@
+"""向量存储管理模块
+
+本模块实现了一个基于FAISS的向量存储管理系统，用于高效存储和检索文本的向量表示。
+
+主要功能：
+- 文本向量化存储和管理
+- 本地持久化存储
+- 高效的相似度检索
+
+核心类：
+VectorStoreManager - 向量存储管理器，提供以下功能：
+- 向量存储：将文档转换为向量并存储
+- 本地持久化：支持向量数据的本地保存和加载
+- 相似度检索：基于向量相似度的文档检索
+- 内存管理：高效的向量存储缓存机制
+"""
+
 from langchain_community.vectorstores import FAISS
 from typing import List, Dict, Optional
 import os

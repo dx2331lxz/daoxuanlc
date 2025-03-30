@@ -43,6 +43,3 @@ htmlcov/
 .cache
 coverage.xml
 *.cover
-
-settings.py
-config.py

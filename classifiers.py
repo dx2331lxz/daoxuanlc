@@ -1,3 +1,19 @@
+"""文本分类器模块
+
+本模块实现了一个基于大语言模型的文本类型分类系统，用于自动识别和分类不同类型的文本内容。
+
+主要功能：
+- 文本类型自动识别
+- 支持多种文本类型（学术、技术、创意、商业）
+- 基于LLM的智能分类
+
+核心类：
+TextTypeClassifier - 文本类型分类器，提供以下功能：
+- 文本分析：使用LLM分析文本特征
+- 类型判断：将文本分类为预定义的类型
+- 智能默认：对未匹配类型提供默认处理
+"""
+
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
