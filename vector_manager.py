@@ -29,6 +29,45 @@ class VectorStoreManager:
         # 确保向量存储目录存在
         if not os.path.exists(self.vector_store_dir):
             os.makedirs(self.vector_store_dir)
+        
+        # 加载知识库文件到向量存储
+        self._load_knowledge_bases()
+    
+    def _load_knowledge_bases(self):
+        """加载知识库文件到向量存储"""
+        from langchain_community.document_loaders import TextLoader
+        from langchain.text_splitter import CharacterTextSplitter
+        
+        # 遍历知识库目录
+        for domain in ['academic', 'technical', 'creative', 'business']:
+            domain_path = os.path.join(self.knowledge_base_dir, domain)
+            if not os.path.exists(domain_path):
+                continue
+                
+            documents = []
+            # 遍历目录下的所有文件
+            for root, _, files in os.walk(domain_path):
+                for file in files:
+                    if file.endswith('.md') or file.endswith('.txt'):
+                        file_path = os.path.join(root, file)
+                        try:
+                            # 加载文档
+                            loader = TextLoader(file_path)
+                            docs = loader.load()
+                            
+                            # 分割文档
+                            text_splitter = CharacterTextSplitter(
+                                chunk_size=1000,
+                                chunk_overlap=200
+                            )
+                            split_docs = text_splitter.split_documents(docs)
+                            documents.extend(split_docs)
+                        except Exception as e:
+                            print(f"加载文件 {file_path} 时出错: {e}")
+            
+            # 保存到向量存储
+            if documents:
+                self.save_vector_store(domain, documents)
     
     def save_vector_store(self, text_type: str, documents: List):
         """保存文档到向量存储"""
@@ -64,9 +103,15 @@ class VectorStoreManager:
         except Exception as e:
             print(f"加载向量存储时出错: {e}")
             return None
-    
+
+
     def search_similar_documents(self, text_type: str, query: str, k: int = 5) -> List[Dict]:
         """搜索相似文档"""
+        # 输入验证
+        if not query or not isinstance(query, str):
+            print("错误：查询文本不能为空且必须是字符串类型")
+            return []
+            
         try:
             vector_store = self.load_vector_store(text_type)
             if not vector_store:
@@ -86,5 +131,5 @@ class VectorStoreManager:
             
             return formatted_results
         except Exception as e:
-            print(f"搜索相似文档时出错: {e}")
+            print(f"搜索相似文档时出错: {str(e)}")
             return []

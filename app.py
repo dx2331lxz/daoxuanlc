@@ -22,15 +22,20 @@ app = FastAPI(
 from ai_editor import AIEditorAssistant
 assistant = AIEditorAssistant(llm, embeddings)
 
-# 创建一个Runnable对象来包装generate_text方法
-generate_runnable = RunnablePassthrough.assign(
-    output=lambda x: assistant.generate_text(x["user_text"], x.get("prompt", ""))
-)
-
 # 请求模型
 class TextGenerationRequest(BaseModel):
-    user_text: str
-    prompt: str = ""
+    user_text: Optional[str] = None
+    prompt: str
+
+# 创建一个Runnable对象来包装generate_text方法
+generate_runnable = (
+    RunnablePassthrough()
+    | {
+        "user_text": lambda x: x.get("user_text", ""),
+        "prompt": lambda x: x["prompt"],
+        "result": lambda x: assistant.generate_text(x.get("user_text", ""), x["prompt"])
+    }
+)
 
 class UserEditRequest(BaseModel):
     original_text: str
@@ -78,6 +83,6 @@ add_routes(
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run("app:app", host="0.0.0.0", port=8000, reload=True)
     
 

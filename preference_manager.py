@@ -7,7 +7,8 @@ from django.apps import apps
 
 def get_mysql_preference_manager():
     from db_manager import DatabaseManager
-    return DatabaseManager()
+    from config import embeddings
+    return DatabaseManager(embeddings)
 
 class UserPreferenceManager:
     def __init__(self, llm: ChatOpenAI):

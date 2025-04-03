@@ -24,6 +24,7 @@ from preference_manager import UserPreferenceManager
 from vector_manager import VectorStoreManager
 from kb_manager import KnowledgeBaseManager
 from db_manager import DatabaseManager
+from classifiers import TextTypeClassifier
 
 class AIEditorAssistant:
     def __init__(self, llm: BaseChatModel, embeddings: Embeddings):
@@ -32,37 +33,46 @@ class AIEditorAssistant:
         self.preference_manager = UserPreferenceManager(llm)
         self.vector_manager = VectorStoreManager(embeddings)
         self.kb_manager = KnowledgeBaseManager(embeddings)
-        self.db_manager = DatabaseManager(embeddings)
+        self.db_manager = DatabaseManager(embeddings)  # 确保传递了embeddings参数
+        self.text_classifier = TextTypeClassifier(llm)
 
     def generate_text(self, user_text: str, prompt: str = "", top_k: int = 3) -> str:
-        """使用LCEL实现的RAG方法生成文本内容
-        
-        Args:
-            user_text: 用户输入的文本
-            prompt: 额外的提示词
-            top_k: 检索的相关文档数量
+        """使用LCEL实现的RAG方法生成文本内容"""
             
-        Returns:
-            生成的文本内容
-        """
         from langchain_core.runnables import RunnablePassthrough
         from langchain_core.prompts import PromptTemplate
         from operator import itemgetter
-        from typing import Sequence, Dict, Any
+        from typing import Dict, Any
         
         # 1. 定义检索链
         def retrieve_docs(input_dict: Dict[str, Any]) -> Dict[str, Any]:
-            docs = self.vector_manager.search_similar_documents(input_dict["user_text"], k=top_k)
-            return {"docs": [doc for doc in docs if doc.relevance_score > 0.7]}
+            # 根据用户输入和提示词确定文本类型
+            query = input_dict['user_text'] if input_dict['user_text'] else input_dict['prompt']
+            text_type = self.text_classifier.classify(query)
+            print(f"文本类型: {text_type}")
+            docs = self.vector_manager.search_similar_documents(
+                query=query,
+                k=top_k,
+                text_type=text_type
+            )
+            print(f"检索到的文档: {docs}")
+            return {"docs": [doc for doc in docs if doc.get("score", 0) > 0.7]}
             
-        retriever_chain = RunnablePassthrough().assign(docs=retrieve_docs)
+        retriever_chain = (
+            RunnablePassthrough()
+            | {
+                "docs": lambda x: retrieve_docs(x)["docs"],
+                "user_text": itemgetter("user_text"),
+                "prompt": itemgetter("prompt")
+            }
+        )
         
         # 2. 定义上下文增强链
         def enhance_context(input_dict: Dict[str, Any]) -> Dict[str, Any]:
             preferences = self.preference_manager.get_preferences()
             kb_context = self.kb_manager.get_relevant_context(input_dict["user_text"])
             context_parts = [
-                f"相关文档 {i+1}: {doc.content}"
+                f"相关文档 {i+1}: {doc["content"]}"
                 for i, doc in enumerate(input_dict["docs"])
             ]
             return {
@@ -71,7 +81,16 @@ class AIEditorAssistant:
                 "kb_context": kb_context
             }
 
-        context_chain = RunnablePassthrough().assign(**enhance_context)
+        context_chain = (
+            RunnablePassthrough()
+            | {
+                "context": lambda x: enhance_context(x)["context"],
+                "preferences": lambda x: enhance_context(x)["preferences"],
+                "kb_context": lambda x: enhance_context(x)["kb_context"],
+                "user_text": itemgetter("user_text"),
+                "prompt": itemgetter("prompt")
+            }
+        )
         
         # 3. 定义提示词模板
         prompt_template = PromptTemplate.from_template("""
@@ -102,8 +121,8 @@ class AIEditorAssistant:
         )
         
         # 5. 执行链并返回结果
-        return chain.invoke({"user_text": user_text, "prompt": prompt})
-
+        result = chain.invoke({"user_text": user_text, "prompt": prompt})
+        return result.content if hasattr(result, 'content') else str(result)
 
     def record_user_edit(self, original_text: str, edited_text: str, text_type: Optional[str] = None) -> None:
         """记录用户编辑"""

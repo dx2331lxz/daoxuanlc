@@ -83,6 +83,9 @@ class KnowledgeBaseManager:
         Returns:
             组合后的相关上下文字符串
         """
+        if not query_text or not isinstance(query_text, str):
+            return ""
+            
         all_contexts = []
         
         # 从每个知识库中检索相关文档
