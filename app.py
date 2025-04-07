@@ -80,8 +80,25 @@ async def get_preferences(text_type: str = "general"):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+
+@app.get("/test-log")
 @log_manager.auto_log_request
+async def test_log_endpoint():
+    """测试日志装饰器功能的端点"""
+    try:
+        # 模拟一些操作
+        result = {"message": "这是一个测试消息", "status": "success"}
+        # 随机抛出异常来测试错误日志
+        import random
+        if random.random() < 0.5:  # 50%的概率抛出异常
+            raise ValueError("这是一个测试异常")
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.post("/generate-with-context")
+@log_manager.auto_log_request
 async def generate_with_context(
     prompt: str = Form(...),
     user_text: Optional[str] = Form(None),
@@ -237,6 +254,7 @@ add_routes(
 
 if __name__ == "__main__":
     import uvicorn
+    # 确保日志管理器已初始化
     uvicorn.run("app:app", host="0.0.0.0", port=8000, reload=True)
     
 
