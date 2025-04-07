@@ -2,11 +2,15 @@ import os
 import django
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form
 from pydantic import BaseModel, HttpUrl
-from typing import Optional
+from typing import Optional, List
 from langserve import add_routes
 from langchain_core.runnables import RunnablePassthrough
 from config import llm, embeddings, streaming_llm
 from langchain.text_splitter import RecursiveCharacterTextSplitter
+from fastapi.responses import StreamingResponse
+from typing import List
+import asyncio
+from logger import log_manager
 
 # 设置Django环境（仅用于ORM）
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'settings')
@@ -76,58 +80,86 @@ async def get_preferences(text_type: str = "general"):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-
+@log_manager.auto_log_request
 @app.post("/generate-with-context")
 async def generate_with_context(
     prompt: str = Form(...),
     user_text: Optional[str] = Form(None),
-    file: Optional[UploadFile] = File(None),
-    url: Optional[HttpUrl] = Form(None)
+    files: Optional[List[UploadFile]] = File(None),
+    urls: Optional[List[HttpUrl]] = Form(None)
 ):
     """生成带有文件或URL上下文的文本内容（流式输出）"""
-    from fastapi.responses import StreamingResponse
-    
     try:
         context = ""
-        if file:
-            content = await file.read()
-            file_extension = file.filename.split('.')[-1].lower()
-            
-            if file_extension == 'txt':
-                context += content.decode('utf-8')
-            elif file_extension == 'md':
-                context += content.decode('utf-8')
-            elif file_extension == 'pdf':
-                from PyPDF2 import PdfReader
-                import io
-                reader = PdfReader(io.BytesIO(content))
-                for page in reader.pages:
-                    context += page.extract_text()
-            elif file_extension == 'docx' or file_extension == 'doc':
-                from docx import Document
-                import io
-                doc = Document(io.BytesIO(content))
-                for para in doc.paragraphs:
-                    context += para.text + '\n'
-            elif file_extension == 'ppt' or file_extension == 'pptx':
-                from pptx import Presentation
-                import io
-                prs = Presentation(io.BytesIO(content))
-                for slide in prs.slides:
-                    for shape in slide.shapes:
-                        if hasattr(shape, "text"):
-                            context += shape.text + '\n'
-            else:
-                raise HTTPException(status_code=400, detail="不支持的文件类型")
-        if url:
-            # 使用requests获取URL内容
-            import requests
-            from bs4 import BeautifulSoup
-            response = requests.get(str(url))
-            response.encoding = 'utf-8'
-            soup = BeautifulSoup(response.text, 'html.parser')
-            context += soup.get_text()
         
+        # 处理多个文件
+        if files:
+            for file in files:
+                content = await file.read()
+                file_extension = file.filename.split('.')[-1].lower()
+                file_context = ""
+                if file_extension in ['txt', 'md']:
+                    file_context = content.decode('utf-8')
+                elif file_extension == 'pdf':
+                    from PyPDF2 import PdfReader
+                    import io
+                    reader = PdfReader(io.BytesIO(content))
+                    file_context = '\n'.join(page.extract_text() for page in reader.pages)
+                elif file_extension in ['docx', 'doc']:
+                    from docx import Document
+                    import io
+                    doc = Document(io.BytesIO(content))
+                    
+                    # 提取段落文本
+                    paragraphs = [para.text.strip() for para in doc.paragraphs if para.text.strip()]
+                    
+                    # 提取表格内容
+                    tables = []
+                    for table in doc.tables:
+                        for row in table.rows:
+                            row_text = ' | '.join(cell.text.strip() for cell in row.cells if cell.text.strip())
+                            if row_text:
+                                tables.append(row_text)
+                    
+                    # 提取列表内容
+                    lists = [f"• {para.text}" for para in doc.paragraphs if para._p.pPr and para._p.pPr.numPr]
+                    
+                    file_context = '\n'.join(paragraphs + tables + lists)
+                    
+                elif file_extension in ['ppt', 'pptx']:
+                    from pptx import Presentation
+                    import io
+                    prs = Presentation(io.BytesIO(content))
+                    slides_text = []
+                    for slide in prs.slides:
+                        slide_text = [shape.text for shape in slide.shapes if hasattr(shape, "text") and shape.text.strip()]
+                        slides_text.extend(slide_text)
+                    file_context = '\n'.join(slides_text)
+                else:
+                    continue  # 跳过不支持的文件类型
+                
+                context += f"\n=== 文件：{file.filename} ===\n{file_context}\n"
+            
+        # 并行处理多个URL
+        if urls:
+            import aiohttp
+            from bs4 import BeautifulSoup
+            
+            async def fetch_url(url):
+                async with aiohttp.ClientSession() as session:
+                    try:
+                        async with session.get(str(url)) as response:
+                            if response.status == 200:
+                                html = await response.text()
+                                soup = BeautifulSoup(html, 'html.parser')
+                                return f"\n=== URL：{url} ===\n{soup.get_text()}\n"
+                    except Exception:
+                        return ""
+                return ""
+            
+            url_contexts = await asyncio.gather(*[fetch_url(url) for url in urls])
+            context += ''.join(url_contexts)
+
         if context:
             # 使用文本分割器将文档分成合适大小的块
             text_splitter = RecursiveCharacterTextSplitter(
@@ -143,7 +175,6 @@ async def generate_with_context(
         else:
             temp_vectorstore = None
         
-        
         # 使用异步生成器进行流式输出
         async def generate_stream():
             try:
@@ -157,7 +188,6 @@ async def generate_with_context(
                     yield f"data: {str(chunk)}\n\n"
             except Exception as e:
                 yield f"data: {str(e)}\n\n"  # 错误处理
-
 
         return StreamingResponse(
             generate_stream(),
