@@ -1,11 +1,12 @@
 import os
 import django
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form
+from pydantic import BaseModel, HttpUrl
 from typing import Optional
 from langserve import add_routes
 from langchain_core.runnables import RunnablePassthrough
-from config import llm, embeddings
+from config import llm, embeddings, streaming_llm
+from langchain.text_splitter import RecursiveCharacterTextSplitter
 
 # 设置Django环境（仅用于ORM）
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'settings')
@@ -20,12 +21,14 @@ app = FastAPI(
 
 # 在Django初始化完成后导入和创建AI编辑器助手实例
 from ai_editor import AIEditorAssistant
-assistant = AIEditorAssistant(llm, embeddings)
+assistant = AIEditorAssistant(llm, streaming_llm, embeddings)
 
 # 请求模型
 class TextGenerationRequest(BaseModel):
     user_text: Optional[str] = None
     prompt: str
+    file: Optional[UploadFile] = None
+    url: Optional[HttpUrl] = None
 
 # 创建一个Runnable对象来包装generate_text方法
 generate_runnable = (
@@ -47,7 +50,8 @@ class UserEditRequest(BaseModel):
 async def generate_text(request: TextGenerationRequest):
     """生成文本内容"""
     try:
-        return assistant.generate_text(request.user_text, request.prompt)
+        # 确保user_text不为None，如果为None则使用空字符串
+        return assistant.generate_text(request.user_text or "", request.prompt)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -72,6 +76,91 @@ async def get_preferences(text_type: str = "general"):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+
+@app.post("/generate-with-context")
+async def generate_with_context(
+    prompt: str = Form(...),
+    user_text: Optional[str] = Form(None),
+    file: Optional[UploadFile] = File(None),
+    url: Optional[HttpUrl] = Form(None)
+):
+    """生成带有文件或URL上下文的文本内容（流式输出）"""
+    from fastapi.responses import StreamingResponse
+    
+    try:
+        context = ""
+        if file:
+            content = await file.read()
+            context += content.decode('utf-8')
+        if url:
+            # 使用requests获取URL内容
+            import requests
+            from bs4 import BeautifulSoup
+            response = requests.get(str(url))
+            response.encoding = 'utf-8'
+            soup = BeautifulSoup(response.text, 'html.parser')
+            context += soup.get_text()
+        
+        if context:
+            # 使用文本分割器将文档分成合适大小的块
+            text_splitter = RecursiveCharacterTextSplitter(
+                chunk_size=1000,
+                chunk_overlap=200,
+                length_function=len,
+                separators=["\n\n", "\n", "。", "！", "？", ".", "!", "?"]
+            )
+            text_chunks = text_splitter.split_text(context)
+            # 创建临时向量存储
+            from langchain_community.vectorstores import FAISS
+            temp_vectorstore = FAISS.from_texts(text_chunks, embeddings)
+        else:
+            temp_vectorstore = None
+        
+        
+        # 使用异步生成器进行流式输出
+        async def generate_stream():
+            try:
+                async for chunk in assistant.generate_text_with_temp_context(
+                    user_text=user_text,
+                    prompt=prompt,
+                    temp_vectorstore=temp_vectorstore,
+                    stream=True
+                ):
+                    # 将每个文本块格式化为SSE消息格式
+                    yield f"data: {str(chunk)}\n\n"
+            except Exception as e:
+                yield f"data: {str(e)}\n\n"  # 错误处理
+
+
+        return StreamingResponse(
+            generate_stream(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "Content-Encoding": "none"
+            }
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# 创建另一个Runnable对象来包装generate_with_context方法
+generate_with_context_runnable = (
+    RunnablePassthrough()
+    | {
+        "user_text": lambda x: x.get("user_text", ""),
+        "prompt": lambda x: x["prompt"],
+        "file": lambda x: x.get("file", None),
+        "url": lambda x: x.get("url", None),
+        "result": lambda x: assistant.generate_text_with_temp_context(
+            user_text=x.get("user_text", ""),
+            prompt=x["prompt"],
+            temp_vectorstore=None  # 需要根据file/url内容创建
+        )
+    }
+)
+
 # 添加LangServe路由
 add_routes(
     app,
@@ -81,8 +170,20 @@ add_routes(
     config_keys=["user_text", "prompt"]
 )
 
+add_routes(
+    app,
+    generate_with_context_runnable,
+    path="/langserve/generate-with-context",
+    input_type=TextGenerationRequest,
+    config_keys=["user_text", "prompt", "file", "url"]
+)
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("app:app", host="0.0.0.0", port=8000, reload=True)
+    
+
+
+
     
 

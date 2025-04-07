@@ -1,0 +1,6 @@
+# 服务器配置
+HOST=
+USER=
+PASSWORD=
+# 项目在服务器上的部署路径
+PROJECT_PATH=

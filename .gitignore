@@ -47,3 +47,6 @@ htmlcov/
 .cache
 coverage.xml
 *.cover
+
+
+deploy.conf
