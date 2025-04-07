@@ -91,7 +91,34 @@ async def generate_with_context(
         context = ""
         if file:
             content = await file.read()
-            context += content.decode('utf-8')
+            file_extension = file.filename.split('.')[-1].lower()
+            
+            if file_extension == 'txt':
+                context += content.decode('utf-8')
+            elif file_extension == 'md':
+                context += content.decode('utf-8')
+            elif file_extension == 'pdf':
+                from PyPDF2 import PdfReader
+                import io
+                reader = PdfReader(io.BytesIO(content))
+                for page in reader.pages:
+                    context += page.extract_text()
+            elif file_extension == 'docx' or file_extension == 'doc':
+                from docx import Document
+                import io
+                doc = Document(io.BytesIO(content))
+                for para in doc.paragraphs:
+                    context += para.text + '\n'
+            elif file_extension == 'ppt' or file_extension == 'pptx':
+                from pptx import Presentation
+                import io
+                prs = Presentation(io.BytesIO(content))
+                for slide in prs.slides:
+                    for shape in slide.shapes:
+                        if hasattr(shape, "text"):
+                            context += shape.text + '\n'
+            else:
+                raise HTTPException(status_code=400, detail="不支持的文件类型")
         if url:
             # 使用requests获取URL内容
             import requests
