@@ -11,6 +11,7 @@ from fastapi.responses import StreamingResponse
 from typing import List
 import asyncio
 from logger import log_manager
+import base64
 
 # 设置Django环境（仅用于ORM）
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'settings')
@@ -45,9 +46,9 @@ generate_runnable = (
 )
 
 class UserEditRequest(BaseModel):
+    user_id: str
     original_text: str
     edited_text: str
-    text_type: Optional[str] = None
 
 # 添加API路由
 @app.post("/generate", response_model=str)
@@ -66,7 +67,7 @@ async def record_edit(request: UserEditRequest):
         assistant.record_user_edit(
             request.original_text,
             request.edited_text,
-            request.text_type
+            user_id=request.user_id
         )
         return {"status": "success"}
     except Exception as e:
@@ -98,7 +99,6 @@ async def test_log_endpoint():
 
 
 @app.post("/generate-with-context")
-@log_manager.auto_log_request
 async def generate_with_context(
     prompt: str = Form(...),
     user_text: Optional[str] = Form(None),
@@ -202,9 +202,12 @@ async def generate_with_context(
                     stream=True
                 ):
                     # 将每个文本块格式化为SSE消息格式
-                    yield f"data: {str(chunk)}\n\n"
+                    print(str(chunk), end='')
+                    encoded_chunk = base64.b64encode(str(chunk).encode('utf-8')).decode('utf-8')
+                    yield f"data: {encoded_chunk}\n\n"
             except Exception as e:
-                yield f"data: {str(e)}\n\n"  # 错误处理
+                encoded_error = base64.b64encode(str(e).encode('utf-8')).decode('utf-8')
+                yield f"data: {encoded_error}\n\n"
 
         return StreamingResponse(
             generate_stream(),

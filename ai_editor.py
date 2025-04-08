@@ -233,7 +233,7 @@ class AIEditorAssistant:
             else:
                 yield str(result)
 
-    def record_user_edit(self, original_text: str, edited_text: str, text_type: Optional[str] = None) -> None:
+    def record_user_edit(self, original_text: str, edited_text: str, user_id: str = None) -> None:
         """记录用户编辑"""
-        # 更新用户偏好
-        self.preference_manager.analyze_edits(original_text, edited_text, text_type)
+        # 更新用户偏好，使用默认的general类型
+        self.preference_manager.analyze_edits(original_text, edited_text)
